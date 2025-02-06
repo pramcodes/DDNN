@@ -1,0 +1,827 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+D1 = np.diag(np.exp(1j*theta_3600_1))
+D2 = np.diag(np.exp(1j*theta_3600_2))
+# Define the size of the image and regions
+image_size = (16, 16)
+detector_regions = [
+    [20, 30, 25, 35],  # Top center region
+    [40, 50, 25, 35],  # Bottom center region
+]
+
+# Function to map region coordinates into the image
+def get_range(region):
+    x0, x1, y0, y1 = region
+    return x0, x1, y0, y1
+
+# Function to calculate light in the region and compare it to the total image light
+def calculate_light(image, region):
+    # Total light in the image
+    total_light = np.sum(image)
+    
+    # Extract the region
+    x0, x1, y0, y1 = get_range(region)
+    region_light = np.sum(image[x0:x1, y0:y1])
+    
+    # Ratio of region light to total light
+    light_ratio = region_light / total_light if total_light > 0 else 0
+    return light_ratio
+
+# Generate two random grayscale images
+np.random.seed(42)  # For reproducibility
+random_images = [
+    np.abs((D2@F@D1@(F@vec.flatten()))).reshape(16, 16),  # First random image
+    np.abs((D2@F@D1@(F@dog_vec.flatten()))).reshape(16, 16),  # Second random image
+]
+
+# Initialize separate arrays for light ratios for each image
+light_ratios_image_1 = []
+light_ratios_image_2 = []
+
+# Process each image
+for img_idx, random_image in enumerate(random_images):
+    light_ratios = []
+    
+    # Calculate light ratios for all regions in the current image
+    for region in detector_regions:
+        light_ratio = calculate_light(random_image, region)
+        light_ratios.append(light_ratio)
+    
+    # Store results in respective arrays
+    if img_idx == 0:
+        light_ratios_image_1 = np.array(light_ratios)
+    elif img_idx == 1:
+        light_ratios_image_2 = np.array(light_ratios)
+    
+    # Visualize the current image and overlay the regions
+    fig, ax = plt.subplots(figsize=(7, 7))
+    ax.imshow(random_image, cmap="gray")
+    ax.set_title(f"Random Image {img_idx + 1} with Detector Regions")
+    
+    # Overlay rectangles for the detector regions
+    for i, region in enumerate(detector_regions):
+        x0, x1, y0, y1 = get_range(region)
+        rect = plt.Rectangle(
+            (y0, x0), y1 - y0, x1 - x0, linewidth=2, edgecolor="red", facecolor="none"
+        )
+        ax.add_patch(rect)
+        ax.text(
+            y0 + 1,
+            x0 + 3,
+            f"Region {i + 1}",
+            color="red",
+            fontsize=10,
+            verticalalignment="top",
+        )
+    plt.show()
+
+# Print results
+print("Light Ratios for Image 1:", light_ratios_image_1)
+print("Light Ratios for Image 2:", light_ratios_image_2)
+
+
+
+First Optimization Algorithm
+
+import numpy as np
+
+# Define detector regions
+detector_regions = [
+    [20, 30, 25, 35],  # Top center region
+    [40, 50, 25, 35],  # Bottom center region
+]
+
+# Function to extrapolate theta values
+def extrapolate_theta_from_20(theta=None):
+    if theta is None:
+        theta = np.random.uniform(0, 2 * np.pi, 20)
+    elif len(theta) != 20:
+        raise ValueError("Input theta must be a list or array with exactly 20 elements.")
+    
+    X = np.linspace(0, 3599, 20)
+    X_new = np.arange(3600)
+    theta_new = np.interp(X_new, X, theta)
+    
+    return theta, theta_new
+
+# Function to calculate light ratios
+def calculate_light_ratios(theta_3600_1, theta_3600_2, vec):
+    D1 = np.diag(np.exp(1j*theta_3600_1))
+    D2 = np.diag(np.exp(1j*theta_3600_2))
+    image = np.abs((D2 @ F @ D1 @ (F @ vec.flatten()))).reshape(60, 60)
+    
+    total_light = np.sum(image)
+    if total_light == 0:
+        raise ValueError("The total light in the image is zero; cannot compute ratios.")
+    
+    light_ratios = []
+    for region in detector_regions:
+        x0, x1, y0, y1 = region
+        region_light = np.sum(image[x0:x1, y0:y1])
+        light_ratios.append(region_light / total_light)
+    
+    return np.array(light_ratios)
+
+# Define the cost function
+def cost_function(theta_3600_1, theta_3600_2, vec, dog_vec):
+    ratios_1 = calculate_light_ratios(theta_3600_1, theta_3600_2, vec)
+    ratios_2 = calculate_light_ratios(theta_3600_1, theta_3600_2, dog_vec)
+    return (np.abs((ratios_1 - np.array([1, 0])) + (ratios_2 - np.array([0, 1])))) ** 2
+
+# Optimization function
+def optimize_theta(vec, dog_vec, F, learning_rate=0.01, max_iter=1000, tol=1e-6):
+    _, theta_3600_1 = extrapolate_theta_from_20()
+    _, theta_3600_2 = extrapolate_theta_from_20()
+    
+    for iteration in range(max_iter):
+        # Compute the cost
+        cost = cost_function(theta_3600_1, theta_3600_2, vec, dog_vec)
+        total_cost = np.sum(cost)
+        
+        # Check if the cost is sufficiently small
+        if total_cost < tol:
+            print(f"Converged in {iteration} iterations.")
+            break
+        
+        # Numerical gradient calculation
+        grad_theta_1 = np.zeros_like(theta_3600_1)
+        grad_theta_2 = np.zeros_like(theta_3600_2)
+        delta = 1e-5
+        
+        for i in range(len(theta_3600_1)):
+            theta_3600_1[i] += delta
+            cost_plus = np.sum(cost_function(theta_3600_1, theta_3600_2, vec, dog_vec))
+            theta_3600_1[i] -= 2 * delta
+            cost_minus = np.sum(cost_function(theta_3600_1, theta_3600_2, vec, dog_vec))
+            grad_theta_1[i] = (cost_plus - cost_minus) / (2 * delta)
+            theta_3600_1[i] += delta  # Reset
+            
+            theta_3600_2[i] += delta
+            cost_plus = np.sum(cost_function(theta_3600_1, theta_3600_2, vec, dog_vec))
+            theta_3600_2[i] -= 2 * delta
+            cost_minus = np.sum(cost_function(theta_3600_1, theta_3600_2, vec, dog_vec))
+            grad_theta_2[i] = (cost_plus - cost_minus) / (2 * delta)
+            theta_3600_2[i] += delta  # Reset
+        
+        # Update parameters
+        theta_3600_1 -= learning_rate * grad_theta_1
+        theta_3600_2 -= learning_rate * grad_theta_2
+    
+    else:
+        print(f"Reached maximum iterations ({max_iter}) without full convergence.")
+    
+    return theta_3600_1, theta_3600_2, total_cost
+
+
+
+optimized_theta_1, optimized_theta_2, final_cost = optimize_theta(vec, dog_vec, F)
+
+# Display results
+print("Optimized Theta 1 (first 5 values):", optimized_theta_1[:5])
+print("Optimized Theta 2 (first 5 values):", optimized_theta_2[:5])
+print("Final Cost:", final_cost)
+
+New Optimizer 
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define the cost function
+def cost_function(theta_3600_1, theta_3600_2, vec, dog_vec):
+    ratios_1 = calculate_light_ratios(theta_3600_1, theta_3600_2, vec)
+    ratios_2 = calculate_light_ratios(theta_3600_1, theta_3600_2, dog_vec)
+    return (np.abs((ratios_1 - np.array([1, 0])) + (ratios_2 - np.array([0, 1])))) ** 2
+
+# Random walk optimization function
+def random_walk_optimization(vec, dog_vec, F, max_steps=1000, step_size=0.4, eps=[5e-4, 1e-6], phase_screen_size=3600):
+    # Initialize theta values
+    _, theta_3600_1 = extrapolate_theta_from_20()
+    _, theta_3600_2 = extrapolate_theta_from_20()
+
+    # Initialize optimization variables
+    coeff = np.zeros(phase_screen_size)  # Initial coefficients (zeroed)
+    delta = np.zeros_like(coeff)         # Step direction
+    error = [1, 1]                       # Error tracking
+    error_best = 1                       # Best error found
+    step_modulator = 0                   # Step size modulator
+    resets = 0                           # Reset counter
+    new_step = True                      # Flag to create a new step
+    plot_points = []                     # For tracking errors
+
+    for step_counter in range(max_steps):
+        # Modulate step size based on iteration
+        alpha = step_size / ((step_modulator + 1) ** 0.602)
+
+        # Generate a new random step
+        if new_step:
+            delta = np.random.choice([-1, 1], size=phase_screen_size)
+            coeff_step = coeff + alpha * delta
+
+        # Take projective measurements (calculate new error)
+        step_modulator += 1
+        error[1] = np.sum(cost_function(theta_3600_1, theta_3600_2, vec, dog_vec))
+
+        # Update error and coefficients if improvement is observed
+        if error[1] <= error[0] or step_modulator == 1:
+            error[0] = error[1]
+            coeff = coeff_step
+
+            # Update global best
+            if error[0] < error_best:
+                error_best = error[0]
+                best_coeff = coeff.copy()
+                stats = {
+                    "step_counter": step_counter,
+                    "error": error_best,
+                    "coefficients": best_coeff,
+                }
+
+            new_step = False  # Keep current step direction
+
+        else:
+            # Handle convergence and resets based on error thresholds
+            if step_modulator >= 41:  # Ensure a sufficient number of steps
+                recent_deviation = np.std(plot_points[-40:]) if len(plot_points) >= 40 else float("inf")
+                if recent_deviation <= eps[1]:  # Reset if variation is minimal
+                    error[0] = error[1]
+                    coeff = coeff_step
+                    step_modulator = 0
+                    resets += 1
+            new_step = True  # Generate a new step direction
+
+        # Record plot points for analysis
+        plot_points.append(error[0])
+
+        # Check stopping condition
+        if all(val < 0.15 for val in error[0]) and all(val > 0 for val in error[0]):
+            print(f"Converged successfully in {step_counter} steps.")
+            break
+
+    else:
+        print(f"Max steps reached ({max_steps}). Final error: {error_best}.")
+
+    return coeff, error_best, plot_points, stats
+
+# Function to check if optimization is successful
+def check_optimization_success(cost_function, theta_3600_1, theta_3600_2, vec, dog_vec):
+    error_vector = cost_function(theta_3600_1, theta_3600_2, vec, dog_vec)
+    print("Final Error Vector:", error_vector)
+    
+    if all(val < 0.15 for val in error_vector) and all(val > 0 for val in error_vector):
+        print("Optimization successfully minimized within the target range.")
+        return True
+    else:
+        print("Optimization did not meet the target range.")
+        return False
+
+# Display plot of error norm during optimization
+def plot_error_progression(plot_points):
+    plt.plot(plot_points, label='Error Norm')
+    plt.axhline(0.15, color='red', linestyle='--', label='Upper Bound (0.15)')
+    plt.xlabel('Iteration')
+    plt.ylabel('Error Norm')
+    plt.legend()
+    plt.title('Error Progression During Optimization')
+    plt.show()
+
+
+coeff, final_error, plot_points, stats = random_walk_optimization(vec, dog_vec, F)
+
+# Display results
+print("Optimized Coefficients (first 5):", coeff[:5])
+print("Final Error:", final_error)
+print("Optimization Stats:", stats)
+
+# Check optimization success
+_, theta_3600_1 = extrapolate_theta_from_20()
+_, theta_3600_2 = extrapolate_theta_from_20()
+check_optimization_success(cost_function, theta_3600_1, theta_3600_2, vec, dog_vec)
+
+# Plot the error progression during optimization
+plot_error_progression(plot_points)
+
+Random walk optimizer 2 
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define the cost function (returns scalar error)
+def cost_function(theta_3600_1, theta_3600_2, vec, dog_vec):
+    ratios_1 = calculate_light_ratios(theta_3600_1, theta_3600_2, vec)
+    ratios_2 = calculate_light_ratios(theta_3600_1, theta_3600_2, dog_vec)
+    
+    # Target arrays
+    target_1 = np.array([1, 0])
+    target_2 = np.array([0, 1])
+    
+    # Compute element-wise squared differences and sum them
+    error_1 = np.sum((ratios_1 - target_1) ** 2)
+    error_2 = np.sum((ratios_2 - target_2) ** 2)
+    
+    # Return the total scalar error
+    return 0.25 * (error_1 + error_2)
+
+# Numerical gradient estimation for theta_3600_1 and theta_3600_2
+def estimate_gradient(cost_function, theta_3600_1, theta_3600_2, vec, dog_vec, epsilon=1e-5):
+    grad_3600_1 = (cost_function(theta_3600_1 + epsilon, theta_3600_2, vec, dog_vec) -
+                   cost_function(theta_3600_1 - epsilon, theta_3600_2, vec, dog_vec)) / (2 * epsilon)
+    grad_3600_2 = (cost_function(theta_3600_1, theta_3600_2 + epsilon, vec, dog_vec) -
+                   cost_function(theta_3600_1, theta_3600_2 - epsilon, vec, dog_vec)) / (2 * epsilon)
+    return grad_3600_1, grad_3600_2
+
+# Random walk optimization function
+def random_walk_optimization(vec, dog_vec, F, max_steps=5000, step_size=0.2, theta_lr=0.05, eps=[5e-4, 1e-6], phase_screen_size=3600):
+    # Initialize theta values with random guesses
+    theta_3600_1 = np.random.uniform(0, 2 * np.pi, 256)
+    theta_3600_2 = np.random.uniform(0, 2 * np.pi, 256)
+
+    # Initialize optimization variables
+    coeff = np.zeros(phase_screen_size)  # Initial coefficients (zeroed)
+    delta = np.zeros_like(coeff)         # Step direction
+    error = [1, 1]                       # Error tracking
+    error_best = 1                       # Best error found
+    step_modulator = 0                   # Step size modulator
+    resets = 0                           # Reset counter
+    new_step = True                      # Flag to create a new step
+    plot_points = []                     # For tracking errors
+    stats = {}                           # Initialize stats as an empty dictionary
+
+    for step_counter in range(max_steps):
+        # Modulate step size based on iteration
+        alpha = step_size / ((step_modulator + 1) ** 0.602)
+
+        # Generate a new random step for coefficients
+        if new_step:
+            delta = np.random.choice([-1, 1], size=phase_screen_size)
+            coeff_step = coeff + alpha * delta
+
+        # Take projective measurements (calculate new error)
+        step_modulator += 1
+        error[1] = cost_function(theta_3600_1, theta_3600_2, vec, dog_vec)
+
+        # Estimate gradients for theta_3600_1 and theta_3600_2
+        grad_3600_1, grad_3600_2 = estimate_gradient(cost_function, theta_3600_1, theta_3600_2, vec, dog_vec)
+
+        # Adjust theta_3600_1 and theta_3600_2 based on the gradients
+        theta_3600_1 -= theta_lr * grad_3600_1
+        theta_3600_2 -= theta_lr * grad_3600_2
+
+        # Update error and coefficients if improvement is observed
+        if error[1] <= error[0] or step_modulator == 1:
+            error[0] = error[1]
+            coeff = coeff_step
+
+            # Update global best
+            if error[0] < error_best:
+                error_best = error[0]
+                best_coeff = coeff.copy()
+                stats = {
+                    "step_counter": step_counter,
+                    "error": error_best,
+                    "coefficients": best_coeff,
+                    "theta_3600_1": theta_3600_1,
+                    "theta_3600_2": theta_3600_2,
+                }
+
+            new_step = False  # Keep current step direction
+
+        else:
+            # Handle convergence and resets based on error thresholds
+            if step_modulator >= 41:  # Ensure a sufficient number of steps
+                recent_deviation = np.std(plot_points[-40:]) if len(plot_points) >= 40 else float("inf")
+                if recent_deviation <= eps[1]:  # Reset if variation is minimal
+                    error[0] = error[1]
+                    coeff = coeff_step
+                    step_modulator = 0
+                    resets += 1
+            new_step = True  # Generate a new step direction
+
+        # Record plot points for analysis
+        plot_points.append(error[0])
+
+        # Check stopping condition
+        if 0 < error[0] < 0.15:
+            print(f"Converged successfully in {step_counter} steps.")
+            break
+
+    else:
+        print(f"Max steps reached ({max_steps}). Final error: {error_best}.")
+
+    return coeff, error_best, plot_points, stats
+
+# Function to check if optimization is successful
+def check_optimization_success(cost_function, theta_3600_1, theta_3600_2, vec, dog_vec):
+    # Call the cost_function to get the scalar error
+    error_scalar = cost_function(theta_3600_1, theta_3600_2, vec, dog_vec)
+    print("Final Error:", error_scalar)
+    
+    # Check if the error falls into the target range
+    if 0 < error_scalar < 0.15:
+        print("Optimization successfully minimized within the target range.")
+        return True
+    else:
+        print("Optimization did not meet the target range.")
+        return False
+
+# Display plot of error norm during optimization
+def plot_error_progression(plot_points):
+    plt.plot(plot_points, label='Error Norm')
+    plt.axhline(0.15, color='red', linestyle='--', label='Upper Bound (0.15)')
+    plt.xlabel('Iteration')
+    plt.ylabel('Error Norm')
+    plt.legend()
+    plt.title('Error Progression During Optimization')
+    plt.show()
+
+
+
+coeff, final_error, plot_points, stats = random_walk_optimization(vec, dog_vec, F)
+
+# Display results
+print("Optimized Coefficients (first 5):", coeff[:5])
+print("Final Error:", final_error)
+print("Optimization Stats:", stats)
+
+# Check optimization success
+check_optimization_success(cost_function, theta_3600_1, theta_3600_2, vec, dog_vec)
+
+# Plot the error progression during optimization
+plot_error_progression(plot_points)
+
+
+Second optimasation Attempt(pixel by pixel)
+
+import numpy as np
+from scipy.optimize import minimize
+
+# Define the cost function
+def costfunction(theta, vec, dog_vec, P, top_filled_image, bottom_filled_image):
+    theta_3600_1, theta_3600_2 = np.split(theta, 2)
+    D1 = np.diag(np.exp(1j * theta_3600_1))
+    D2 = np.diag(np.exp(1j * theta_3600_2))
+
+    img_vec = np.abs((D2 @ P @ D1 @ (P @ vec.flatten()))).reshape(16, 16)
+    img_dog = np.abs((D2 @ P @ D1 @ (P @ dog_vec.flatten()))).reshape(16, 16)
+
+    return (1 / 256) * np.sum((img_vec - top_filled_image) ** 2 + (img_dog - bottom_filled_image) ** 2)
+
+# Random initial theta values
+theta_3600_1 = np.random.uniform(0, 2 * np.pi, 256)
+theta_3600_2 = np.random.uniform(0, 2 * np.pi, 256)
+
+# Combine into a single optimization vector
+theta_initial = np.concatenate([theta_3600_1, theta_3600_2])
+
+# Optimization using L-BFGS-B
+result = minimize(
+    costfunction, theta_initial, args=(vec, dog_vec, P, top_filled_image, bottom_filled_image),
+    method="L-BFGS-B", options={"disp": True, "maxiter": 1000}
+)
+
+# Extract optimized theta values
+theta_3600_1_opt, theta_3600_2_opt = np.split(result.x, 2)
+
+# Display results
+print("Optimization successful:", result.success)
+print("Final cost:", result.fun)
+print("Optimized theta_3600_1:", theta_3600_1_opt[:5])  # Print first 5 values as example
+print("Optimized theta_3600_2:", theta_3600_2_opt[:5])  # Print first 5 values as example
+
+Secondary adam optimizer
+
+import numpy as np
+
+# Adam optimizer for phase screen optimization
+def adam_optimizer(costfunction, theta_3600_1, theta_3600_2, vec, dog_vec, 
+                   alpha=0.1, beta1=0.9, beta2=0.999, epsilon=1e-8, 
+                   max_iters=1000, tol=1e-6, decay_rate=0.99):
+    
+    # Initialize moment estimates and iteration counter
+    m1, v1 = np.zeros_like(theta_3600_1), np.zeros_like(theta_3600_1)
+    m2, v2 = np.zeros_like(theta_3600_2), np.zeros_like(theta_3600_2)
+    t = 0  # Iteration counter
+    
+    for t in range(1, max_iters + 1):
+        # Compute gradients using numerical differentiation
+        grad1 = numerical_gradient(lambda x: costfunction(x, theta_3600_2, vec, dog_vec), theta_3600_1)
+        grad2 = numerical_gradient(lambda x: costfunction(theta_3600_1, x, vec, dog_vec), theta_3600_2)
+        
+        # Update biased first moment estimate
+        m1 = beta1 * m1 + (1 - beta1) * grad1
+        m2 = beta1 * m2 + (1 - beta1) * grad2
+        
+        # Update biased second moment estimate
+        v1 = beta2 * v1 + (1 - beta2) * (grad1 ** 2)
+        v2 = beta2 * v2 + (1 - beta2) * (grad2 ** 2)
+        
+        # Compute bias-corrected moment estimates
+        m1_hat = m1 / (1 - beta1 ** t)
+        m2_hat = m2 / (1 - beta1 ** t)
+        v1_hat = v1 / (1 - beta2 ** t)
+        v2_hat = v2 / (1 - beta2 ** t)
+        
+        # Update parameters with learning rate decay
+        alpha_t = alpha * (decay_rate ** t)
+        theta_3600_1 -= alpha_t * m1_hat / (np.sqrt(v1_hat) + epsilon)
+        theta_3600_2 -= alpha_t * m2_hat / (np.sqrt(v2_hat) + epsilon)
+        
+        # Compute new cost and check for convergence
+        cost = costfunction(theta_3600_1, theta_3600_2, vec, dog_vec)
+        if cost < tol:
+            print(f"Converged in {t} iterations with cost: {cost}")
+            break
+    else:
+        print(f"Max iterations reached. Final cost: {cost}")
+    
+    return theta_3600_1, theta_3600_2
+
+# Numerical gradient approximation
+def numerical_gradient(f, theta, h=1e-5):
+    grad = np.zeros_like(theta)
+    for i in range(len(theta)):
+        theta_plus = theta.copy()
+        theta_minus = theta.copy()
+        theta_plus[i] += h
+        theta_minus[i] -= h
+        grad[i] = (f(theta_plus) - f(theta_minus)) / (2 * h)
+    return grad
+
+# Initialize theta values
+np.random.seed(42)
+theta_3600_1 = np.random.uniform(0, 2 * np.pi, 256)
+theta_3600_2 = np.random.uniform(0, 2 * np.pi, 256)
+
+# Run the optimizer
+theta_3600_1_opt, theta_3600_2_opt = adam_optimizer(costfunction, theta_3600_1, theta_3600_2, vec, dog_vec)
+
+# Optimized theta values are stored in theta_3600_1_opt, theta_3600_2_opt
+
+Adam optimizer 
+
+import numpy as np
+
+# Cost function
+def costfunction(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image):
+    D1 = np.diag(np.exp(1j * theta_3600_1))
+    D2 = np.diag(np.exp(1j * theta_3600_2))
+    
+    transformed_vec = np.abs((D2 @ P @ D1 @ (P @ vec.flatten()))).reshape(16, 16)
+    transformed_dog_vec = np.abs((D2 @ P @ D1 @ (P @ dog_vec.flatten()))).reshape(16, 16)
+
+    return (1/256) * np.sum((transformed_vec - top_filled_image) ** 2 + (transformed_dog_vec - bottom_filled_image) ** 2)
+
+# Compute Analytical Gradients
+def compute_gradients(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image):
+    D1 = np.diag(np.exp(1j * theta_3600_1))
+    D2 = np.diag(np.exp(1j * theta_3600_2))
+
+    transformed_vec = (D2 @ P @ D1 @ (P @ vec.flatten())).reshape(16, 16)
+    transformed_dog_vec = (D2 @ P @ D1 @ (P @ dog_vec.flatten())).reshape(16, 16)
+
+    error_vec = transformed_vec - top_filled_image
+    error_dog_vec = transformed_dog_vec - bottom_filled_image
+
+    # Compute gradients using chain rule
+    grad_theta_1 = np.real(1j * np.exp(1j * theta_3600_1) * np.diag(P.T @ D2.T @ error_vec.flatten()))
+    grad_theta_2 = np.real(1j * np.exp(1j * theta_3600_2) * np.diag(P.T @ error_dog_vec.flatten()))
+
+    return grad_theta_1, grad_theta_2
+
+# Adam optimizer implementation
+def adam_optimizer(cost_function, theta_3600_1, theta_3600_2, vec, dog_vec, P, 
+                   top_filled_image, bottom_filled_image, 
+                   learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-8, max_iters=5000, tol=1e-6):
+    
+    # Initialize moment estimates
+    m1, v1 = np.zeros_like(theta_3600_1), np.zeros_like(theta_3600_1)
+    m2, v2 = np.zeros_like(theta_3600_2), np.zeros_like(theta_3600_2)
+    
+    for t in range(1, max_iters + 1):
+        # Compute analytical gradients
+        grad_theta_1, grad_theta_2 = compute_gradients(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+        
+        # Update biased first moment estimate
+        m1 = beta1 * m1 + (1 - beta1) * grad_theta_1
+        m2 = beta1 * m2 + (1 - beta1) * grad_theta_2
+        
+        # Update biased second raw moment estimate
+        v1 = beta2 * v1 + (1 - beta2) * (grad_theta_1 ** 2)
+        v2 = beta2 * v2 + (1 - beta2) * (grad_theta_2 ** 2)
+        
+        # Bias correction
+        m1_hat = m1 / (1 - beta1 ** t)
+        m2_hat = m2 / (1 - beta1 ** t)
+        v1_hat = v1 / (1 - beta2 ** t)
+        v2_hat = v2 / (1 - beta2 ** t)
+        
+        # Update parameters
+        theta_3600_1 -= learning_rate * m1_hat / (np.sqrt(v1_hat) + epsilon)
+        theta_3600_2 -= learning_rate * m2_hat / (np.sqrt(v2_hat) + epsilon)
+        
+        # Compute cost to check convergence
+        cost = cost_function(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+        
+        if cost < tol:
+            print(f"Converged in {t} iterations with cost: {cost}")
+            break
+        
+        if t % 500 == 0:
+            print(f"Iteration {t}: Cost = {cost}")
+    
+    return theta_3600_1, theta_3600_2
+
+# Initialize theta values
+np.random.seed(42)
+theta_3600_1 = np.random.uniform(0, 2 * np.pi, 256)
+theta_3600_2 = np.random.uniform(0, 2 * np.pi, 256)
+
+# Define example inputs
+P = np.random.randn(256, 256)  # Example transformation matrix
+vec = np.random.randn(256)  # Example input vector
+dog_vec = np.random.randn(256)  # Example second input vector
+top_filled_image = np.random.randn(16, 16)  # Example top detector target
+bottom_filled_image = np.random.randn(16, 16)  # Example bottom detector target
+
+# Run Adam optimizer with analytical gradients
+theta_3600_1_opt, theta_3600_2_opt = adam_optimizer(costfunction, theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+
+# Print final values
+print("Optimized theta_3600_1:", theta_3600_1_opt)
+print("Optimized theta_3600_2:", theta_3600_2_opt)
+
+import numpy as np
+
+# Cost function
+def costfunction(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image):
+    D1 = np.diag(np.exp(1j * theta_3600_1))
+    D2 = np.diag(np.exp(1j * theta_3600_2))
+    
+    transformed_vec = np.abs((D2 @ P @ D1 @ (P @ vec.flatten()))).reshape(16, 16)
+    transformed_dog_vec = np.abs((D2 @ P @ D1 @ (P @ dog_vec.flatten()))).reshape(16, 16)
+
+    return (1/256) * np.sum((transformed_vec - top_filled_image) ** 2 + (transformed_dog_vec - bottom_filled_image) ** 2)
+
+# Compute Analytical Gradients
+def compute_gradients(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image):
+    D1 = np.diag(np.exp(1j * theta_3600_1))
+    D2 = np.diag(np.exp(1j * theta_3600_2))
+
+    transformed_vec = (D2 @ P @ D1 @ (P @ vec.flatten())).reshape(16, 16)
+    transformed_dog_vec = (D2 @ P @ D1 @ (P @ dog_vec.flatten())).reshape(16, 16)
+
+    error_vec = transformed_vec - top_filled_image
+    error_dog_vec = transformed_dog_vec - bottom_filled_image
+
+    # Compute gradients correctly (fix shape issue)
+    grad_theta_1 = np.real(1j * np.exp(1j * theta_3600_1) * np.sum(P.T @ D2.T @ error_vec.flatten(), axis=0))
+    grad_theta_2 = np.real(1j * np.exp(1j * theta_3600_2) * np.sum(P.T @ error_dog_vec.flatten(), axis=0))
+
+    return grad_theta_1, grad_theta_2
+
+# Adam optimizer implementation
+def adam_optimizer(cost_function, theta_3600_1, theta_3600_2, vec, dog_vec, P, 
+                   top_filled_image, bottom_filled_image, 
+                   learning_rate=0.0001, beta1=0.9, beta2=0.999, epsilon=1e-8, max_iters=1000000, tol=1e-6):
+    
+    # Initialize moment estimates
+    m1, v1 = np.zeros_like(theta_3600_1), np.zeros_like(theta_3600_1)
+    m2, v2 = np.zeros_like(theta_3600_2), np.zeros_like(theta_3600_2)
+    
+    for t in range(1, max_iters + 1):
+        # Compute analytical gradients
+        grad_theta_1, grad_theta_2 = compute_gradients(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+        
+        # Update biased first moment estimate
+        m1 = beta1 * m1 + (1 - beta1) * grad_theta_1
+        m2 = beta1 * m2 + (1 - beta1) * grad_theta_2
+        
+        # Update biased second raw moment estimate
+        v1 = beta2 * v1 + (1 - beta2) * (grad_theta_1 ** 2)
+        v2 = beta2 * v2 + (1 - beta2) * (grad_theta_2 ** 2)
+        
+        # Bias correction
+        m1_hat = m1 / (1 - beta1 ** t)
+        m2_hat = m2 / (1 - beta1 ** t)
+        v1_hat = v1 / (1 - beta2 ** t)
+        v2_hat = v2 / (1 - beta2 ** t)
+        
+        # Update parameters
+        theta_3600_1 -= learning_rate * m1_hat / (np.sqrt(v1_hat) + epsilon)
+        theta_3600_2 -= learning_rate * m2_hat / (np.sqrt(v2_hat) + epsilon)
+        
+        # Compute cost to check convergence
+        cost = cost_function(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+        
+        if cost < tol:
+            print(f"Converged in {t} iterations with cost: {cost}")
+            break
+        
+        if t % 500 == 0:
+            print(f"Iteration {t}: Cost = {cost}")
+    
+    return theta_3600_1, theta_3600_2
+
+# Initialize theta values
+np.random.seed(42)
+theta_3600_1 = np.random.uniform(0, 2 * np.pi, 256)
+theta_3600_2 = np.random.uniform(0, 2 * np.pi, 256)
+
+# Define example inputs
+P = np.random.randn(256, 256)  # Example transformation matrix
+vec = np.random.randn(256)  # Example input vector
+dog_vec = np.random.randn(256)  # Example second input vector
+top_filled_image = np.random.randn(16, 16)  # Example top detector target
+bottom_filled_image = np.random.randn(16, 16)  # Example bottom detector target
+
+# Run Adam optimizer with analytical gradients
+theta_3600_1_opt, theta_3600_2_opt = adam_optimizer(costfunction, theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+
+# Print final values
+print("Optimized theta_3600_1:", theta_3600_1_opt)
+print("Optimized theta_3600_2:", theta_3600_2_opt)
+
+Best optimizer for 2 layers and 60by60 image 
+
+import numpy as np
+
+# Cost function
+def costfunction(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image):
+    D1 = np.diag(np.exp(1j * theta_3600_1))
+    D2 = np.diag(np.exp(1j * theta_3600_2))
+    D3 = np.diag(np.exp(1j*theta_3600_3))
+    
+    transformed_vec = np.abs((D3@P@D2 @ P @ D1 @ (P @ vec.flatten()))).reshape(16, 16)
+    transformed_dog_vec = np.abs((D3@P@D2 @ P @ D1 @ (P @ dog_vec.flatten()))).reshape(16, 16)
+    
+    error_top = (transformed_vec - top_filled_image) ** 2
+    error_bottom = (transformed_dog_vec - bottom_filled_image) ** 2
+    
+    cost = np.mean(error_top + error_bottom)
+    return cost
+
+# Adam optimizer
+def adam_optimizer(costfunction, theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image,
+                   learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, max_iters=100000, tol=1e-6):
+    m1, v1 = np.zeros_like(theta_3600_1), np.zeros_like(theta_3600_1)
+    m2, v2 = np.zeros_like(theta_3600_2), np.zeros_like(theta_3600_2)
+    
+    for t in range(1, max_iters + 1):
+        # Compute analytical gradients
+        grad1, grad2 = compute_gradients(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+        
+        # Update biased first moment estimate
+        m1 = beta1 * m1 + (1 - beta1) * grad1
+        m2 = beta1 * m2 + (1 - beta1) * grad2
+        
+        # Update biased second raw moment estimate
+        v1 = beta2 * v1 + (1 - beta2) * (grad1 ** 2)
+        v2 = beta2 * v2 + (1 - beta2) * (grad2 ** 2)
+        
+        # Compute bias-corrected moment estimates
+        m1_hat = m1 / (1 - beta1 ** t)
+        m2_hat = m2 / (1 - beta1 ** t)
+        v1_hat = v1 / (1 - beta2 ** t)
+        v2_hat = v2 / (1 - beta2 ** t)
+        
+        # Update parameters
+        theta_3600_1 -= learning_rate * m1_hat / (np.sqrt(v1_hat) + epsilon)
+        theta_3600_2 -= learning_rate * m2_hat / (np.sqrt(v2_hat) + epsilon)
+        
+        # Compute cost to check convergence
+        cost = costfunction(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+        if cost < tol:
+            print(f"Converged in {t} iterations with cost: {cost}")
+            break
+        
+        if t % 500 == 0:
+            print(f"Iteration {t}: Cost = {cost}")
+    
+    return theta_3600_1, theta_3600_2
+
+# Compute analytical gradients
+def compute_gradients(theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image):
+    D1 = np.diag(np.exp(1j * theta_3600_1))
+    D2 = np.diag(np.exp(1j * theta_3600_2))
+    D3 = np.diag(np.exp(1j*theta_3600_3))
+    
+    transformed_vec = np.abs((D3@P@D2 @ P @ D1 @ (P @ vec.flatten()))).reshape(16, 16)
+    transformed_dog_vec = np.abs((D3@P@D2 @ P @ D1 @ (P @ dog_vec.flatten()))).reshape(16, 16)
+    
+    error_top = (transformed_vec - top_filled_image)
+    error_bottom = (transformed_dog_vec - bottom_filled_image)
+    
+    grad_theta_1 = np.real(2 * np.imag(D1) @ P.T @ (D2.T @ error_top.flatten() + D2.T @ error_bottom.flatten()))
+    grad_theta_2 = np.real(2 * np.imag(D2) @ P.T @ (D1.T @ error_top.flatten() + D1.T @ error_bottom.flatten()))
+    
+    return grad_theta_1, grad_theta_2
+
+# Initialize theta values
+theta_3600_1 = np.random.uniform(0, 2 * np.pi, 256)
+theta_3600_2 = np.random.uniform(0, 2 * np.pi, 256)
+theta_3600_3 = np.random.uniform(0, 2 * np.pi, 256)
+
+# Run optimizer
+theta_3600_1_opt, theta_3600_2_opt = adam_optimizer(costfunction, theta_3600_1, theta_3600_2, vec, dog_vec, P, top_filled_image, bottom_filled_image)
+
+
